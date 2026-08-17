@@ -1,0 +1,6 @@
+build/
+.gradle/
+# Legacy Maven output is intentionally not a supported build artifact.
+target/
+.idea/
+*.iml

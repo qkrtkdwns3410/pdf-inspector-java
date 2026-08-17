@@ -1,0 +1,121 @@
+plugins {
+    id 'java'
+    id 'application'
+}
+
+group = 'dev.pdfinspector'
+version = '0.1.0-SNAPSHOT'
+
+def pdfboxVersion = '3.0.8'
+def junitVersion = '5.10.2'
+def junitPlatformVersion = '1.10.2'
+
+if (!JavaVersion.current().isCompatibleWith(JavaVersion.VERSION_17)) {
+    throw new GradleException('PDF Inspector Java must be built and run with JDK 17 or newer.')
+}
+
+repositories {
+    mavenCentral()
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.release = 17
+    options.encoding = 'UTF-8'
+}
+
+dependencies {
+    implementation "org.apache.pdfbox:pdfbox:${pdfboxVersion}"
+    testImplementation "org.junit.jupiter:junit-jupiter:${junitVersion}"
+    testRuntimeOnly "org.junit.platform:junit-platform-launcher:${junitPlatformVersion}"
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+}
+
+def sharedFixture = file('src/test/resources/fixtures/thermo-freon12.pdf')
+def pdf2mdSmokeOutput = new ByteArrayOutputStream()
+def detectSmokeOutput = new ByteArrayOutputStream()
+
+tasks.register('smokePdf2Md', JavaExec) {
+    group = 'verification'
+    description = 'Smoke-tests the pdf2md CLI against a shared PDF fixture.'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'dev.pdfinspector.cli.Pdf2Md'
+    args sharedFixture.absolutePath, '--raw'
+    standardOutput = pdf2mdSmokeOutput
+    doLast {
+        if (pdf2mdSmokeOutput.toString('UTF-8').trim().isEmpty()) {
+            throw new GradleException('pdf2md smoke test produced no Markdown.')
+        }
+    }
+}
+
+tasks.register('smokeDetectPdf', JavaExec) {
+    group = 'verification'
+    description = 'Smoke-tests the detect-pdf CLI against a shared PDF fixture.'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'dev.pdfinspector.cli.DetectPdf'
+    args sharedFixture.absolutePath, '--analyze', '--json'
+    standardOutput = detectSmokeOutput
+    doLast {
+        if (!detectSmokeOutput.toString('UTF-8').contains('"pdf_type"')) {
+            throw new GradleException('detect-pdf smoke test did not produce its JSON contract.')
+        }
+    }
+}
+
+tasks.register('performanceTest', JavaExec) {
+    group = 'verification'
+    description = 'Measures warmed PDF processing and checks a matching local baseline.'
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'dev.pdfinspector.PerformanceHarness'
+    if (project.hasProperty('updatePerformanceBaseline')) {
+        jvmArgs '-Dpdfinspector.performance.updateBaseline=true'
+    }
+}
+
+tasks.named('check') {
+    dependsOn tasks.named('smokePdf2Md')
+    dependsOn tasks.named('smokeDetectPdf')
+}
+
+application {
+    mainClass = 'dev.pdfinspector.cli.Pdf2Md'
+}
+
+tasks.register('detectPdf', JavaExec) {
+    group = 'application'
+    description = 'Runs the detect-pdf CLI. Pass arguments with -PcliArgs="<pdf> --json".'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'dev.pdfinspector.cli.DetectPdf'
+    if (project.hasProperty('cliArgs')) {
+        args project.property('cliArgs').trim().split('\\s+')
+    }
+}
+
+tasks.register('fatJar', Jar) {
+    group = 'build'
+    description = 'Builds the self-contained pdf2md executable JAR.'
+    archiveClassifier = 'all'
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    manifest {
+        attributes('Main-Class': 'dev.pdfinspector.cli.Pdf2Md')
+    }
+    from sourceSets.main.output
+    dependsOn configurations.runtimeClasspath
+    from {
+        configurations.runtimeClasspath.collect { dependency ->
+            dependency.isDirectory() ? dependency : zipTree(dependency)
+        }
+    }
+}
+
+tasks.named('build') {
+    dependsOn tasks.named('fatJar')
+}
