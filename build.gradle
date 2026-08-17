@@ -80,6 +80,15 @@ tasks.register('performanceTest', JavaExec) {
     }
 }
 
+tasks.register('profilePerformance', JavaExec) {
+    group = 'verification'
+    description = 'Profiles the warmed performance workload with JDK Flight Recorder.'
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'dev.pdfinspector.PerformanceHarness'
+    jvmArgs '-Dpdfinspector.performance.skipBaseline=true'
+    jvmArgs '-XX:StartFlightRecording=filename=build/reports/performance/profile-%p.jfr,settings=profile,dumponexit=true'
+}
+
 tasks.named('check') {
     dependsOn tasks.named('smokePdf2Md')
     dependsOn tasks.named('smokeDetectPdf')

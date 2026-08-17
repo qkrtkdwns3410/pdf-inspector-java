@@ -4,8 +4,10 @@ import dev.pdfinspector.model.TextItem;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.common.PDRectangle;
 import org.apache.pdfbox.pdmodel.font.PDFont;
@@ -25,6 +27,7 @@ import org.apache.pdfbox.util.Vector;
 public final class PdfBoxContentStreamExtractor extends PDFTextStripper {
     private final List<TextItem> items = new ArrayList<TextItem>();
     private final ToUnicodeFallbackDecoder fallbackDecoder = new ToUnicodeFallbackDecoder();
+    private final Map<PDFont, FontStyle> fontStyles = new IdentityHashMap<PDFont, FontStyle>();
     private int extractingPage;
 
     public PdfBoxContentStreamExtractor() throws IOException {
@@ -37,6 +40,7 @@ public final class PdfBoxContentStreamExtractor extends PDFTextStripper {
             throw new IllegalArgumentException("pageNumber is outside the document: " + pageNumber);
         }
         items.clear();
+        fontStyles.clear();
         extractingPage = pageNumber;
         setStartPage(pageNumber);
         setEndPage(pageNumber);
@@ -46,6 +50,7 @@ public final class PdfBoxContentStreamExtractor extends PDFTextStripper {
 
     @Override
     protected void processTextPosition(TextPosition position) {
+        FontStyle style = fontStyle(position.getFont());
         items.add(new TextItem(
                 extractingPage,
                 position.getUnicode(),
@@ -53,11 +58,11 @@ public final class PdfBoxContentStreamExtractor extends PDFTextStripper {
                 position.getYDirAdj(),
                 position.getWidthDirAdj(),
                 position.getHeightDir(),
-                fontName(position.getFont()),
+                style.name(),
                 position.getFontSizeInPt(),
-                isBold(position.getFont()),
-                isItalic(position.getFont())));
-        super.processTextPosition(position);
+                style.bold(),
+                style.italic()));
+        // PDFTextStripper's string assembly is unused: this extractor owns positioned output.
     }
 
     @Override
@@ -83,8 +88,9 @@ public final class PdfBoxContentStreamExtractor extends PDFTextStripper {
         }
         float height = Math.max(1.0f, Math.abs(matrix.getScalingFactorY()) * 0.8f);
         float fontSize = getGraphicsState().getTextState().getFontSize();
-        items.add(new TextItem(extractingPage, text, x, y, width, height, fontName(font), fontSize,
-                isBold(font), isItalic(font), unresolved));
+        FontStyle style = fontStyle(font);
+        items.add(new TextItem(extractingPage, text, x, y, width, height, style.name(), fontSize,
+                style.bold(), style.italic(), unresolved));
     }
 
     private static boolean isMissing(String text) {
@@ -103,13 +109,18 @@ public final class PdfBoxContentStreamExtractor extends PDFTextStripper {
         return font == null ? "" : font.getName();
     }
 
-    private static boolean isBold(PDFont font) {
-        String name = fontName(font).toLowerCase(Locale.ROOT);
-        return name.contains("bold") || name.contains("black");
+    private FontStyle fontStyle(PDFont font) {
+        FontStyle style = fontStyles.get(font);
+        if (style != null) {
+            return style;
+        }
+        String name = fontName(font);
+        String normalizedName = name.toLowerCase(Locale.ROOT);
+        style = new FontStyle(name, normalizedName.contains("bold") || normalizedName.contains("black"),
+                normalizedName.contains("italic") || normalizedName.contains("oblique"));
+        fontStyles.put(font, style);
+        return style;
     }
 
-    private static boolean isItalic(PDFont font) {
-        String name = fontName(font).toLowerCase(Locale.ROOT);
-        return name.contains("italic") || name.contains("oblique");
-    }
+    private record FontStyle(String name, boolean bold, boolean italic) { }
 }

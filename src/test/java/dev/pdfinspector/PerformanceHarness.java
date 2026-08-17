@@ -49,6 +49,10 @@ public final class PerformanceHarness {
             System.out.println("Performance baseline updated: " + baseline);
             return;
         }
+        if (Boolean.getBoolean("pdfinspector.performance.skipBaseline")) {
+            System.out.println("Performance report: " + latest);
+            return;
+        }
         verifyBaseline(baseline, environment, measurements);
         System.out.println("Performance report: " + latest);
     }

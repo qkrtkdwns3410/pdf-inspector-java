@@ -33,15 +33,18 @@ public final class PdfTypeDetector {
         List<Integer> candidates = candidatePages(document.getNumberOfPages(), selectedPages);
         List<Integer> sampledPages = samplePages(candidates, config);
         List<PageEvidence> evidence = new ArrayList<PageEvidence>();
+        java.util.Map<Integer, PageEvidence> evidenceByPage = new java.util.HashMap<Integer, PageEvidence>();
         for (Integer pageNumber : sampledPages) {
             PageExtraction extracted = pagesByNumber.get(pageNumber);
             List<TextItem> textItems = extracted == null ? Collections.<TextItem>emptyList() : extracted.getItems();
             PageResourceInspector.ImageStats imageStats = resourceInspector.inspect(
                     document.getPage(pageNumber.intValue() - 1));
-            evidence.add(PageEvidence.from(pageNumber.intValue(), textItems, imageStats,
-                    config.getScannedImagePixelThreshold()));
+            PageEvidence pageEvidence = PageEvidence.from(pageNumber.intValue(), textItems, imageStats,
+                    config.getScannedImagePixelThreshold());
+            evidence.add(pageEvidence);
+            evidenceByPage.put(pageNumber, pageEvidence);
         }
-        return summarize(evidence, pagesByNumber);
+        return summarize(evidence, pagesByNumber, evidenceByPage);
     }
 
     private List<Integer> candidatePages(int pageCount, Set<Integer> selectedPages) {
@@ -71,7 +74,8 @@ public final class PdfTypeDetector {
         return new ArrayList<Integer>(sampled);
     }
 
-    private DetectionResult summarize(List<PageEvidence> evidence, java.util.Map<Integer, PageExtraction> pagesByNumber) {
+    private DetectionResult summarize(List<PageEvidence> evidence, java.util.Map<Integer, PageExtraction> pagesByNumber,
+                                    java.util.Map<Integer, PageEvidence> evidenceByPage) {
         if (evidence.isEmpty()) {
             return new DetectionResult(PdfType.IMAGE_BASED, 0, 0, 0.0d,
                     Collections.<Integer>emptyList(), Collections.<PageOcrReasons>emptyList(), false);
@@ -102,7 +106,11 @@ public final class PdfTypeDetector {
 
         for (PageExtraction page : pagesByNumber.values()) {
             Integer pageNumber = Integer.valueOf(page.getPage());
-            if (TextQualityAnalyzer.hasEncodingIssue(page.getItems())) {
+            PageEvidence pageEvidence = evidenceByPage.get(pageNumber);
+            boolean hasEncodingIssue = pageEvidence == null
+                    ? TextQualityAnalyzer.hasEncodingIssue(page.getItems())
+                    : pageEvidence.garbledText();
+            if (hasEncodingIssue) {
                 encodingIssues = true;
                 reasonNamesByPage.put(pageNumber, Collections.singletonList(
                         OcrReason.SUSPECTED_GARBLED_TEXT.getWireName()));
